@@ -1,0 +1,238 @@
+#include "car.h"
+#include "usart.h"
+#include "tcrt5000.h"
+#include "hc_sr04.h"
+
+#define OBSTACLE_THRESHOLD 20.0f  // 假设 20cm 以下为障碍物
+#define BACKWARD_DURATION 1000    // 后退时间（毫秒）
+#define TURN_DURATION 1000        // 右转时间（毫秒）
+
+/*************************
+ *  @brief 控制电机 IN1 PWM 占空比
+ *  @param duty 占空比值
+ *  @return 无
+ *  @note 无
+ *************************/
+static inline void __SetIN1PWM(uint16_t duty)
+{
+    __HAL_TIM_SET_COMPARE(IN1_TIM, IN1_CH, duty);
+}
+/*************************
+ *  @brief 控制电机 IN2 PWM 占空比
+ *  @param duty 占空比值
+ *  @return 无
+ *  @note 无
+ *************************/
+static inline void __SetIN2PWM(uint16_t duty)
+{
+    __HAL_TIM_SET_COMPARE(IN2_TIM, IN2_CH, duty);
+}
+
+/*************************
+ *  @brief 控制电机 IN3 PWM 占空比
+ *  @param duty 占空比值
+ *  @return 无
+ *  @note 无
+ *************************/
+static inline void __SetIN3PWM(uint16_t duty)
+{
+    __HAL_TIM_SET_COMPARE(IN3_TIM, IN3_CH, duty);
+}
+/*************************
+ *  @brief 控制电机 IN4 PWM 占空比
+ *  @param duty 占空比值
+ *  @return 无
+ *  @note 无
+ *************************/
+static inline void __SetIN4PWM(uint16_t duty)
+{
+    __HAL_TIM_SET_COMPARE(IN4_TIM, IN4_CH, duty);
+}
+
+/*************************
+ *  @brief 控制小车前进
+ *  @param speed 小车速度
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Forward(uint16_t speed)
+{
+    printf("Motor_Forward\r\n");
+    __SetIN1PWM(0);
+    __SetIN2PWM(speed);
+
+    __SetIN3PWM(speed);
+    __SetIN4PWM(0);
+}
+
+/*************************
+ *  @brief 控制小车后退
+ *  @param speed 小车速度
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Backward(uint16_t speed)
+{
+    printf("Motor_Backward\r\n");
+    __SetIN1PWM(speed);
+    __SetIN2PWM(0);
+
+    __SetIN3PWM(0);
+    __SetIN4PWM(speed);
+}
+
+/*************************
+ *  @brief 控制小车右转
+ *  @param speed 小车速度
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Right(uint16_t speed)
+{
+    printf("Motor_Right\r\n");
+    __SetIN1PWM(speed);
+    __SetIN2PWM(0);
+
+    __SetIN3PWM(speed);
+    __SetIN4PWM(0);
+    
+}
+
+/*************************
+ *  @brief 控制小车左转
+ *  @param speed 小车速度
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Left(uint16_t speed)
+{
+    printf("Motor_Right\r\n");
+    __SetIN1PWM(0);
+    __SetIN2PWM(speed);
+
+    __SetIN3PWM(0);
+    __SetIN4PWM(speed);
+}
+void Motor_Turnback(uint16_t speed);
+
+/*************************
+ *  @brief 控制小车刹车
+ *  @param 无
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Stop(void)
+{
+    __SetIN1PWM(MAX_SPEED);
+    __SetIN2PWM(MAX_SPEED);
+
+    __SetIN3PWM(MAX_SPEED);
+    __SetIN4PWM(MAX_SPEED);
+}
+
+/*************************
+ *  @brief 控制小车刹车
+ *  @param 无
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Slide(void)
+{
+    __SetIN1PWM(0);
+    __SetIN2PWM(0);
+
+    __SetIN3PWM(0);
+    __SetIN4PWM(0);
+}
+
+
+/*************************
+ *  @brief 远程控制小车
+ *  @param Buffer：控制信号
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_Control(uint8_t* Buffer)
+{
+    uint16_t speed = 500;
+    
+    if(strstr((char *)Buffer, "FORWARD"))
+    {
+        Motor_Forward(speed);
+    }
+    else if(strstr((char *)Buffer, "BACKWARD"))
+    {
+        Motor_Backward(speed);
+    }
+    else if((strstr((char *)Buffer, "RIGHT"))
+    {
+        Motor_Right(speed);
+    }
+    else if((strstr((char *)Buffer, "LEFT"))
+    {
+        Motor_Left(speed);
+    }
+    else
+    {
+        Motor_Slide();
+    }
+    
+    memset(Buffer, '\0', sizeof((char *)Buffer));
+}
+
+/*************************
+ *  @brief 小车的循迹与避障功能
+ *  @param 无
+ *  @return 无
+ *  @note 无
+ *************************/
+void Motor_TraceAndAvoid(void)
+{
+    // 获取左右传感器的电压
+    float right_voltage = Tcrt5000_Right();
+    float left_voltage = Tcrt5000_Left();
+    // 获取超声波传感器的距离
+    float distance = Ultra_Distance();
+
+    // 电压差计算（判断是否偏离轨迹）
+    float voltage_diff = right_voltage - left_voltage;
+
+    // 设置默认速度
+    uint16_t speed = 500;
+
+    // 判断是否偏离轨迹
+    if (voltage_diff > 0.1f) {
+        // 右侧电压高，表示左偏，需要右转
+        speed = (uint16_t)(MAX_SPEED - voltage_diff * 500);
+        Motor_Right(speed);  // 右转
+    } 
+    else if (voltage_diff < -0.1f) {
+        // 左侧电压高，表示右偏，需要左转
+        speed = (uint16_t)(MAX_SPEED + voltage_diff * 500);
+        Motor_Left(speed);  // 左转
+    } 
+    else {
+        // 没有偏离轨迹，前进
+        Motor_Forward(MAX_SPEED);
+    }
+
+    // 如果前方有障碍物，停止，后退，右转绕过
+    if (distance < OBSTACLE_THRESHOLD) {  // 距离小于阈值，认为前方有障碍物
+        Motor_Stop();           // 停止
+        HAL_Delay(500);          // 停顿 500ms
+        Motor_Backward(speed);  // 后退
+        HAL_Delay(BACKWARD_DURATION);  // 后退 1秒
+        Motor_Right(speed);    // 右转
+        HAL_Delay(TURN_DURATION);   // 右转 1秒
+
+        // 再检查前方是否有障碍物，确保绕过障碍物后恢复前进
+        distance = Ultra_Distance();
+        if (distance > OBSTACLE_THRESHOLD) {
+            Motor_Forward(speed);  // 继续前进
+        } else {
+            Motor_Left(speed);     // 如果右转后仍然有障碍物，则左转
+        }
+    }
+}
+
+
